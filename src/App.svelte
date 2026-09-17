@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import AudioSettings from './components/AudioSettings.svelte';
   import CanvasSettings from './components/CanvasSettings.svelte';
   import CreditEditor from './components/CreditEditor.svelte';
@@ -32,6 +32,35 @@
     mimeType: string;
     bitmap: ImageBitmap;
   }
+
+  type StoredImage = Omit<ImageAssetDraft, 'key'> & {
+    mimeType?: string;
+    dataBase64?: string;
+  };
+
+  interface StoredSettings {
+    format: 'credit-roll-generator';
+    version: 1;
+    text: string;
+    fontGroups: FontGroupDraft[];
+    images: StoredImage[];
+    snippets: Snippet[];
+    wrap: boolean;
+    textAlign: TextAlign;
+    width: number;
+    height: number;
+    padding: number;
+    fps: number;
+    backgroundColor: string;
+    duration: number;
+    blankStart: number;
+    blankEnd: number;
+    durationMode: DurationMode;
+    volume: number;
+    audioStart: number;
+  }
+
+  const SETTINGS_KEY = 'credit-roll-generator:settings:v1';
 
   const DEFAULT_TEXT = `<b>SAMPLE</b>
 테스트 크레딧
@@ -209,6 +238,193 @@ sample credit`;
     });
     scheduleRebuild();
   });
+
+  function isStoredSettings(value: unknown): value is StoredSettings {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const data = value as Partial<StoredSettings>;
+    const numbers = [data.width, data.height, data.padding, data.fps, data.duration, data.blankStart, data.blankEnd, data.volume, data.audioStart];
+    return data.format === 'credit-roll-generator'
+      && data.version === 1
+      && typeof data.text === 'string'
+      && Array.isArray(data.fontGroups)
+      && data.fontGroups.length > 0
+      && Array.isArray(data.images)
+      && Array.isArray(data.snippets)
+      && typeof data.wrap === 'boolean'
+      && (data.textAlign === 'left' || data.textAlign === 'center' || data.textAlign === 'right')
+      && typeof data.backgroundColor === 'string'
+      && (data.durationMode === 'credit' || data.durationMode === 'audio')
+      && numbers.every((number) => typeof number === 'number' && Number.isFinite(number));
+  }
+
+  function parseStoredSettings(raw: string): StoredSettings | null {
+    try {
+      const value: unknown = JSON.parse(raw);
+      return isStoredSettings(value) ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function arrayBufferToBase64(data: ArrayBuffer): string {
+    const bytes = new Uint8Array(data);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+    }
+    return btoa(binary);
+  }
+
+  function base64ToArrayBuffer(base64: string): ArrayBuffer {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    return bytes.buffer;
+  }
+
+  function stringifySettings(includeImages: boolean): string {
+    const storedImages: StoredImage[] = images.map((image) => {
+      const resource = includeImages ? imageResources.get(image.key) : undefined;
+      return {
+        id: image.id,
+        width: image.width,
+        height: image.height,
+        fileName: resource ? image.fileName : '',
+        sourceWidth: resource ? image.sourceWidth : 0,
+        sourceHeight: resource ? image.sourceHeight : 0,
+        ...(resource ? { mimeType: resource.mimeType, dataBase64: arrayBufferToBase64(resource.data) } : {}),
+      };
+    });
+
+    const settings: StoredSettings = {
+      format: 'credit-roll-generator',
+      version: 1,
+      text,
+      fontGroups: fontGroups.map((group) => ({ ...group })),
+      images: storedImages,
+      snippets: snippets.map((snippet) => ({ ...snippet })),
+      wrap,
+      textAlign,
+      width,
+      height,
+      padding,
+      fps,
+      backgroundColor,
+      duration,
+      blankStart,
+      blankEnd,
+      durationMode,
+      volume,
+      audioStart,
+    };
+    return JSON.stringify(settings, null, 2);
+  }
+
+  function createTransferJson(): string {
+    if (audioBuffer || audioFileName || audioLoading) {
+      alert('음성 파일은 저장하거나 복사할 수 없으며 현재 설정 데이터에 포함되지 않습니다.');
+    }
+    const hasImages = images.some((image) => imageResources.has(image.key));
+    const includeImages = hasImages && confirm('이미지를 Base64로 함께 저장할까요?\n취소하면 이미지 파일 데이터는 저장하지 않습니다.');
+    return stringifySettings(includeImages);
+  }
+
+  function resetImageResources() {
+    for (const resource of imageResources.values()) resource.bitmap.close();
+    imageResources.clear();
+    imageLoadTokens.clear();
+  }
+
+  function updateNextIds() {
+    const numericFontIds = fontGroups.slice(1).map((group) => Number(group.id)).filter(Number.isInteger);
+    const numericImageIds = images.map((image) => Number(image.id)).filter(Number.isInteger);
+    nextFontGroupId = Math.max(0, ...numericFontIds) + 1;
+    nextImageId = Math.max(0, ...numericImageIds) + 1;
+  }
+
+  async function applyStoredSettings(settings: StoredSettings) {
+    resetImageResources();
+    nextImageKey = 1;
+    audioDecodeToken++;
+    audioBuffer = null;
+    audioFileName = '';
+    audioLoading = false;
+
+    text = settings.text;
+    fontGroups = settings.fontGroups.map((group) => ({ ...group }));
+    snippets = settings.snippets.length ? settings.snippets.map((snippet) => ({ ...snippet })) : [{ search: '', replacement: '' }];
+    wrap = settings.wrap;
+    textAlign = settings.textAlign;
+    width = settings.width;
+    height = settings.height;
+    padding = settings.padding;
+    fps = settings.fps;
+    backgroundColor = settings.backgroundColor;
+    duration = settings.duration;
+    blankStart = settings.blankStart;
+    blankEnd = settings.blankEnd;
+    durationMode = settings.durationMode;
+    volume = settings.volume;
+    audioStart = settings.audioStart;
+    images = [];
+
+    for (const stored of settings.images) {
+      const draft: ImageAssetDraft = {
+        key: `image-${nextImageKey++}`,
+        id: stored.id,
+        width: stored.width,
+        height: stored.height,
+        fileName: '',
+        sourceWidth: 0,
+        sourceHeight: 0,
+      };
+      images.push(draft);
+      if (!stored.dataBase64 || !stored.mimeType) continue;
+      const data = base64ToArrayBuffer(stored.dataBase64);
+      const bitmap = await createImageBitmap(new Blob([data], { type: stored.mimeType }));
+      imageResources.set(draft.key, { data, mimeType: stored.mimeType, bitmap });
+      Object.assign(draft, {
+        fileName: stored.fileName,
+        sourceWidth: bitmap.width,
+        sourceHeight: bitmap.height,
+      });
+    }
+
+    updateNextIds();
+    error = '';
+    scheduleRebuild();
+  }
+
+  function handleSave() {
+    try {
+      localStorage.setItem(SETTINGS_KEY, createTransferJson());
+      error = '';
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(createTransferJson());
+      error = '';
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+
+  function handlePaste(event: ClipboardEvent) {
+    const raw = event.clipboardData?.getData('text/plain');
+    if (!raw) return;
+    const settings = parseStoredSettings(raw);
+    if (!settings) return;
+    event.preventDefault();
+    if (!confirm('복사된 크레딧 설정을 현재 설정에 적용할까요?')) return;
+    void applyStoredSettings(settings).catch((cause) => {
+      error = cause instanceof Error ? cause.message : String(cause);
+    });
+  }
 
   function updateFontGroup(index: number, patch: Partial<FontGroupDraft>) {
     Object.assign(fontGroups[index], patch);
@@ -392,18 +608,35 @@ sample credit`;
     requestAnimationFrame(() => document.getElementById(`tab-${activeTab}`)?.focus());
   }
 
+  onMount(() => {
+    window.addEventListener('paste', handlePaste);
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    const parsed = saved ? parseStoredSettings(saved) : null;
+    if (parsed) {
+      void applyStoredSettings(parsed).catch((cause) => {
+        error = cause instanceof Error ? cause.message : String(cause);
+      });
+    }
+    return () => window.removeEventListener('paste', handlePaste);
+  });
+
   onDestroy(() => {
     if (rebuildTimer) clearTimeout(rebuildTimer);
     fontRegistry.dispose();
-    for (const resource of imageResources.values()) resource.bitmap.close();
-    imageResources.clear();
+    resetImageResources();
   });
 </script>
 
 <main>
   <header class="page-header">
-    <h1>크레딧 생성기</h1>
-    <p>스크롤 크레딧 MP4 생성기</p>
+    <div>
+      <h1>크레딧 생성기</h1>
+      <p>스크롤 크레딧 MP4 생성기</p>
+    </div>
+    <div class="page-actions">
+      <button type="button" onclick={handleSave}>저장</button>
+      <button type="button" onclick={handleCopy}>복사</button>
+    </div>
   </header>
 
   <section class="settings-tabs">

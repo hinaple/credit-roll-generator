@@ -91,3 +91,35 @@ progress { width: min(280px, 100%); }
   .group-id-input, .image-id-input { width: 100% !important; margin-top: 5px !important; }
   .timeline-row { align-items: stretch; flex-direction: column; gap: 6px; }
 }
+
+html, body, #app { min-height: 100%; }
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.page-header p { margin-bottom: 0; }
+.page-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+
+@media (min-width: 1000px) and (min-height: 720px) {
+  html, body, #app { height: 100%; overflow: hidden; }
+  main {
+    display: grid;
+    grid-template-areas:
+      "header header"
+      "preview settings"
+      "editor settings";
+    grid-template-columns: minmax(0, 1fr) minmax(420px, .72fr);
+    grid-template-rows: auto minmax(0, 1fr) minmax(220px, .42fr);
+    gap: 16px;
+    width: min(1600px, calc(100% - 32px));
+    height: 100dvh;
+    padding: 20px 0;
+    overflow: hidden;
+  }
+  .page-header { grid-area: header; margin: 0; }
+  .settings-tabs { grid-area: settings; min-height: 0; margin: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .fixed-text-panel { grid-area: editor; min-height: 0; height: 100%; margin: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .fixed-text-panel textarea { flex: 1 1 auto; min-height: 0; resize: none; }
+  .output-panel { grid-area: preview; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+}
+
+@media (max-width: 540px) {
+  .page-header { flex-wrap: wrap; }
+}
