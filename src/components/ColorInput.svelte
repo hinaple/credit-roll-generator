@@ -24,7 +24,8 @@
         'https://cdn.jsdelivr.net/gh/wipeautcrafter/jscolorpicker@main/dist/colorpicker.min.js'
       );
       if (disposed || !input) return;
-      const instance = new ColorPicker(input, {
+      const inputElement = input;
+      const instance = new ColorPicker(inputElement, {
         toggleStyle: 'input',
         submitMode: 'instant',
         enableAlpha: true,
@@ -33,7 +34,7 @@
       });
       instance.on('pick', (color) => {
         const next = color ? color.string('hex') : '';
-        input.value = next;
+        inputElement.value = next;
         onchange(next);
       });
       picker = instance;
