@@ -19,7 +19,7 @@ jobs:
           cat .bootstrap/chunk* | base64 -d > /tmp/credit-generator-source.tar.gz
           tar -xzf /tmp/credit-generator-source.tar.gz
           rm -rf .bootstrap
-          rm -f .github/workflows/bootstrap.yml
+          rm -f .github/workflows/deploy.yml
 
       - name: Commit restored source
         run: |
